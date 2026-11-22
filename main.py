@@ -51,7 +51,7 @@ def maybe_run_nothing(cid, text, sel, workers, by_num):
 # passes, assume the edit is harmless for the heavy tests too and drop them (and the passing
 # cheap tests). Memory / retention tests check something the cheap tests cannot, so they are
 # never dropped this way.
-PROXY = os.environ.get("BR_PROXY", "1") == "1"
+PROXY = os.environ.get("BR_PROXY", "0") == "1"  # off: on mutants the cheap part passed while test_execute_tpcds failed
 HEAVY_MIN_S = float(os.environ.get("BR_HEAVY_MIN", "2.0"))     # recorded seconds = "heavy"
 PROXY_MAX_EST = float(os.environ.get("BR_PROXY_EST", "1.5"))   # CPU s we spend per commit
 PROXY_MIN_SAVING = 6.0                                          # simulated s it must save
