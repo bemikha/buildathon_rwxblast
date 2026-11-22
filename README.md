@@ -31,9 +31,24 @@ in-process pool that still pickles arguments and results, so work done in child 
 Tests are split across workers with longest-first packing, choosing the worker count (1-8)
 that minimises `max load + 2 s x workers`.
 
-## Files
+## Proving a commit harmless
 
-- `main.py`, `select_tests.py`: the selector (standard library only)
+When the selected tests are few and cheap (estimated under 0.9 s of CPU and under 45% of what
+running them would cost), the image runs them itself against the patched code. If every one
+passes, the commit runs nothing and saves its 2 s worker. Anything else (a failure, a timeout,
+a crash, a patch that touches test files or does not apply) keeps the static selection.
+
+- The image installs the kit's `requirements.lock` and sqlglot at the pinned commit
+  (`fetch_sqlglot.py`), precompiled, so the run matches the labelling environment.
+- Patched modules are loaded from the patch through an import hook; nothing is written to disk.
+- Each check runs in a forked child with a wall-clock limit and a per-test timeout.
+
+
+
+- `main.py`, `select_tests.py`: the selector
+- `dynverify.py`: runs a few tests against the patched code (see above)
+- `cpu_est.json`: measured CPU cost of each test, to decide when that is worth it
+- `fetch_sqlglot.py`, `requirements.lock`: build-time environment
 - `index.pkl.gz`: the maps (about 2.4 MB)
 - `tools/`: scripts that build the maps from the pinned commit
 
@@ -57,7 +72,7 @@ python ../tools/cmp_order.py && python ../tools/build_index4.py index.pkl order.
 
 ## Checks done
 
-- sample: 0 misses, 103.9 simulated (the floor, picking exactly the failing tests, is 94.4)
+- sample: 0 misses, 97.1 simulated + about 2.2 s CPU (the floor, picking exactly the failing tests, is 94.4)
 - about 80 bugs injected the same way as the sample (operator flips, constants, fixture edits,
   comments), labelled by running the suite: 0 misses
 - 405 patches (sample, injected, and real sqlglot history) run through the selector without an error
