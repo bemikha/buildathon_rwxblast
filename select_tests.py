@@ -420,6 +420,7 @@ def select_mask(patch_text):
 
 
 LAZY_LOAD = "tests/dialects/test_dialect.py::TestDialect::test_lazy_load"
+MAX_NODES = "tests/test_parser.py::TestParser::test_max_nodes"
 TYPING_META = "tests/test_typing.py::TestTyping::test_no_redundant_expression_metadata"
 SQLGLOTC = ["tests/test_sqlglotc.py::TestSQLGlotC::test_build_removes_obsolete_extensions",
             "tests/test_sqlglotc.py::TestSQLGlotC::test_dry_run_preserves_obsolete_extensions",
@@ -462,6 +463,10 @@ def select(patch_text):
             if x not in res: res.append(x)
     except Exception:
         pass
+    # RISKY: test_max_nodes (28.8 s) only failed for edits on parser hot paths, which already
+    # select over a thousand tests; drop it for narrower edits.
+    if MAX_NODES in res and len(res) < 1000:
+        res.remove(MAX_NODES)
     return res
 
 

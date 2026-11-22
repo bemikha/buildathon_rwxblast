@@ -1,5 +1,5 @@
 """Entry point: read /data, print one JSON line per commit."""
-import json, os, sys, time
+import json, os, re, sys, time
 t0 = time.process_time()
 DATA = os.environ.get("BR_DATA", "/data")
 import select_tests as S
@@ -45,6 +45,39 @@ def maybe_run_nothing(cid, text, sel, workers, by_num):
     return [] if verdict == "pass" else workers
 
 
+# --- heavy-test proxy -------------------------------------------------------------------
+# A few tests (test_max_nodes ~23 s, test_execute_tpcds ~22 s, ...) set the busiest worker of
+# any commit that selects them. Run the cheap part of the selection here instead: if all of it
+# passes, assume the edit is harmless for the heavy tests too and drop them (and the passing
+# cheap tests). Memory / retention tests check something the cheap tests cannot, so they are
+# never dropped this way.
+PROXY = os.environ.get("BR_PROXY", "1") == "1"
+HEAVY_MIN_S = float(os.environ.get("BR_HEAVY_MIN", "2.0"))     # recorded seconds = "heavy"
+PROXY_MAX_EST = float(os.environ.get("BR_PROXY_EST", "1.5"))   # CPU s we spend per commit
+PROXY_MIN_SAVING = 6.0                                          # simulated s it must save
+NEVER_PROXY = re.compile(os.environ.get("BR_NEVER_PROXY", r"memory|retain"))
+
+
+def maybe_drop_heavy(cid, text, sel, workers, by_id, by_num):
+    heavy = [t for t in sel if by_id[t]["seconds"] >= HEAVY_MIN_S]
+    if not heavy:
+        return workers
+    keep = [t for t in heavy if NEVER_PROXY.search(t)]
+    light = [t for t in sel if t not in heavy]
+    if not light:
+        return workers  # nothing cheap covers the edit: no proxy to run
+    import dynverify as D
+    est = D.estimate_cpu(light)
+    after = best_split([(round(by_id[t]["seconds"] * 1000), by_id[t]["number"]) for t in keep])
+    saving = static_cost(workers, by_num) - static_cost(after, by_num)
+    if est > PROXY_MAX_EST or saving < PROXY_MIN_SAVING + est:
+        return workers
+    verdict, detail = D.run_tests(text, light, wall_timeout=max(10.0, 6 * est), per_test_timeout=8)
+    print(f"{cid}: proxy {verdict} light={len(light)} est={est:.2f} drop={len(heavy) - len(keep)} "
+          f"saving={saving:.1f} {str(detail)[:80]}", file=sys.stderr)
+    return after if verdict == "pass" else workers
+
+
 def main():
     tests = json.load(open(os.path.join(DATA, "tests.json")))["tests"]
     by_id = {t["id"]: t for t in tests}
@@ -68,6 +101,11 @@ def main():
                 workers = maybe_run_nothing(cid, text, sel, workers, by_num)
             except Exception as e:  # any doubt: keep the static selection
                 print(f"{cid}: dynamic check error {e!r}", file=sys.stderr)
+        if workers and PROXY and time.monotonic() - wall0 < DYN_BUDGET_WALL:
+            try:
+                workers = maybe_drop_heavy(cid, text, sel, workers, by_id, by_num)
+            except Exception as e:  # any doubt: keep the static selection
+                print(f"{cid}: proxy error {e!r}", file=sys.stderr)
         if workers:
             # tests recorded at 0 ms cost nothing once a worker exists: free insurance
             have = {n for w in workers for n in w}
